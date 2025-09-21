@@ -1,4 +1,8 @@
 import { useState } from "react"
+import { useMutation, useQuery } from "@tanstack/react-query"
+import { api, ApiError } from "@/lib/api"
+import { useToast } from "@/hooks/use-toast"
+import type { Document, DocumentAnalysis } from "@shared/schema"
 import { DocumentUpload } from "@/components/DocumentUpload"
 import { RiskDashboard } from "@/components/RiskDashboard"
 import { DocumentSummary } from "@/components/DocumentSummary"
@@ -12,8 +16,29 @@ type ViewState = "upload" | "analysis"
 export default function HomePage() {
   const [viewState, setViewState] = useState<ViewState>("upload")
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
-  const [isProcessing, setIsProcessing] = useState(false)
-  const [progress, setProgress] = useState(0)
+  const [currentDocument, setCurrentDocument] = useState<Document | null>(null)
+  const [currentAnalysis, setCurrentAnalysis] = useState<DocumentAnalysis | null>(null)
+  const { toast } = useToast()
+
+  const uploadMutation = useMutation({
+    mutationFn: api.uploadDocument,
+    onSuccess: (data) => {
+      setCurrentDocument(data.document)
+      setCurrentAnalysis(data.analysis)
+      setViewState("analysis")
+      toast({
+        title: "Document analyzed successfully!",
+        description: "Your legal document has been processed and analyzed.",
+      })
+    },
+    onError: (error: ApiError) => {
+      toast({
+        title: "Upload failed",
+        description: error.message,
+        variant: "destructive",
+      })
+    },
+  })
 
   // todo: remove mock functionality
   const mockStats = {
@@ -83,27 +108,15 @@ export default function HomePage() {
 
   const handleFileSelect = (file: File) => {
     setSelectedFile(file)
-    setIsProcessing(true)
-    setProgress(0)
-
-    // Simulate processing
-    const interval = setInterval(() => {
-      setProgress(prev => {
-        if (prev >= 100) {
-          clearInterval(interval)
-          setIsProcessing(false)
-          setViewState("analysis")
-          return 100
-        }
-        return prev + 10
-      })
-    }, 300)
+    uploadMutation.mutate(file)
   }
 
   const handleBackToUpload = () => {
     setViewState("upload")
     setSelectedFile(null)
-    setProgress(0)
+    setCurrentDocument(null)
+    setCurrentAnalysis(null)
+    uploadMutation.reset()
   }
 
   if (viewState === "upload") {
@@ -124,8 +137,8 @@ export default function HomePage() {
           {/* Upload Section */}
           <DocumentUpload 
             onFileSelect={handleFileSelect}
-            isProcessing={isProcessing}
-            progress={progress}
+            isProcessing={uploadMutation.isPending}
+            progress={uploadMutation.isPending ? 50 : 0}
           />
 
           {/* Features */}
@@ -197,42 +210,50 @@ export default function HomePage() {
           <div>
             <h1 className="text-2xl font-bold">Document Analysis</h1>
             <p className="text-sm text-muted-foreground">
-              {selectedFile?.name || "Commercial Lease Agreement.pdf"}
+              {currentDocument?.filename || selectedFile?.name || "Document"}
             </p>
           </div>
         </div>
 
         <div className="grid lg:grid-cols-3 gap-6">
-          {/* Left Column - Dashboard and Summary */}
-          <div className="lg:col-span-1 space-y-6">
-            <RiskDashboard 
-              stats={mockStats}
-              documentName={selectedFile?.name}
-            />
-            
-            <DocumentSummary
-              summary={mockSummary}
-              keyInsights={mockInsights}
-              recommendations={mockRecommendations}
-              onDownload={() => console.log("Download annotated document")}
-              onAudioExplanation={() => console.log("Audio explanation")}
-              onAskQuestion={() => console.log("Ask question")}
-            />
-          </div>
+          {currentAnalysis ? (
+            <>
+              {/* Left Column - Dashboard and Summary */}
+              <div className="lg:col-span-1 space-y-6">
+                <RiskDashboard 
+                  stats={currentAnalysis.riskStats}
+                  documentName={currentDocument?.filename}
+                />
+                
+                <DocumentSummary
+                  summary={currentAnalysis.summary}
+                  keyInsights={currentAnalysis.keyInsights}
+                  recommendations={currentAnalysis.recommendations}
+                  onDownload={() => console.log("Download annotated document")} // todo: implement download
+                  onAudioExplanation={() => console.log("Audio explanation")} // todo: implement audio
+                  onAskQuestion={() => console.log("Ask question")} // todo: implement chat
+                />
+              </div>
 
-          {/* Right Column - Clause Analysis */}
-          <div className="lg:col-span-2">
-            <Card>
-              <CardHeader>
-                <CardTitle>Clause-by-Clause Analysis</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {mockClauses.map((clause) => (
-                  <ClauseCard key={clause.id} {...clause} />
-                ))}
-              </CardContent>
-            </Card>
-          </div>
+              {/* Right Column - Clause Analysis */}
+              <div className="lg:col-span-2">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Clause-by-Clause Analysis</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {currentAnalysis.clauses.map((clause) => (
+                      <ClauseCard key={clause.id} {...clause} />
+                    ))}
+                  </CardContent>
+                </Card>
+              </div>
+            </>
+          ) : (
+            <div className="col-span-3 text-center py-12">
+              <p className="text-muted-foreground">No analysis available</p>
+            </div>
+          )}
         </div>
       </div>
     </div>
